@@ -1,0 +1,32 @@
+apply plugin: 'java'
+apply plugin: 'groovy'
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+
+    implementation gradleApi()
+    implementation localGroovy()
+    implementation 'org.javassist:javassist:3.28.0-GA'
+    //noinspection GradleDependency
+    compileOnly 'com.android.tools.build:gradle:4.2.2'
+}
+
+task sourcesJar(type: Jar) {
+    getArchiveClassifier().set('sources')
+    from sourceSets.main.allSource
+}
+artifacts {
+    archives sourcesJar
+}
+
+version = '1.0.2'
+
+jar {
+    manifest {
+        attributes("proxy-version" : version)
+    }
+}
+
+if (file("${rootProject.projectDir}/upload-maven.gradle").exists()) {
+    apply from: "${rootProject.projectDir}/upload-maven.gradle"
+}

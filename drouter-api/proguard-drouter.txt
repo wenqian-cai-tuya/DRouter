@@ -1,0 +1,13 @@
+# for api-stub
+-dontwarn com.didi.drouter.loader.host.*
+
+# for plugin apk
+-keep class com.didi.drouter.loader.** {*;}
+
+# keep constructor avoid removed
+-keepclassmembers @com.didi.drouter.annotation.Router class * extends android.view.View {
+   <init>(...);
+}
+-keepclassmembers @com.didi.drouter.annotation.Service class * {
+   <init>(...);
+}

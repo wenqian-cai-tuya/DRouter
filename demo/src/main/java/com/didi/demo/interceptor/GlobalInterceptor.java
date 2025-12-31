@@ -1,0 +1,30 @@
+package com.didi.demo.interceptor;
+
+import androidx.annotation.NonNull;
+
+import com.didi.drouter.annotation.Interceptor;
+import com.didi.drouter.router.IRouterInterceptor;
+import com.didi.drouter.router.Request;
+import com.didi.drouter.utils.RouterLogger;
+
+
+/**
+ * Created by gaowei on 2018/9/7
+ */
+@Interceptor(priority = 1, global = true)
+public class GlobalInterceptor implements IRouterInterceptor {
+
+    public GlobalInterceptor() {
+        RouterLogger.getAppLogger().d("GlobalInterceptor create");
+    }
+
+    @Override
+    public void handle(@NonNull final Request request) {
+
+        // 可以重定向
+        request.setRedirect(request.getUri().toString());
+        request.getInterceptor().onContinue();
+    }
+
+
+}
