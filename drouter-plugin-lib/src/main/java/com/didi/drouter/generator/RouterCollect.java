@@ -237,7 +237,22 @@ class RouterCollect extends AbsRouterCollect {
                             "\nhas duplication of name with class: " + duplicate);
                 }
             } catch (Exception e) {
-                throw new Exception("Class: === " + routerCc.getName() + " ===\nCause: " + e.getMessage(), e);
+                String jarPath = getClassJarPath(routerCc);
+                // Check if it's a ZIP/JAR corruption error
+                if (isZipError(e)) {
+                    System.err.println("=== Corrupted JAR detected in RouterCollect ===");
+                    System.err.println("  Class: " + routerCc.getName());
+                    if (jarPath != null) {
+                        System.err.println("  JAR file: " + jarPath);
+                    }
+                    System.err.println("  Error: " + e.getMessage());
+                    System.err.println("  >>> Skipping this class, build will continue <<<");
+                    // Skip this class and continue with others
+                    continue;
+                }
+                // For other errors, throw as before
+                String errorMsg = "Class: === " + routerCc.getName() + " ===\nCause: " + e.getMessage();
+                throw new Exception(errorMsg, e);
             }
         }
         Collections.sort(items);

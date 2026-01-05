@@ -60,6 +60,9 @@ public class RouterTask {
         StoreUtil.clear();
         JarUtils.INSTANCE.printVersion(compileClassPath);
         pool = new ClassPool();
+        if(wTmpDir != null){
+            ClassPool.cacheOpenedJarFile = false;
+        }
         classClassify = new ClassClassify(pool, SystemUtil.setting);
         startExecute();
     }
@@ -181,7 +184,48 @@ public class RouterTask {
 
     private void resolveJarFile(File file) throws IOException {
         if (!TextUtil.excludeJarNameFile(file.getName())) {
-            JarFile jar = new JarFile(createFile(file, ".jar"));
+            resolveJarFileWithRetry(file, 3);
+        }
+    }
+
+    private void resolveJarFileWithRetry(File file, int maxRetries) throws IOException {
+        int attempt = 0;
+        IOException lastException = null;
+        while (attempt < maxRetries) {
+            attempt++;
+            try {
+                doResolveJarFile(file);
+                return; // success
+            } catch (IOException e) {
+                lastException = e;
+                if (e.getMessage() != null && e.getMessage().contains("ZipFile invalid LOC header")) {
+                    Logger.w("=== Corrupted JAR detected ===");
+                    Logger.w("  JAR file: " + file.getAbsolutePath());
+                    Logger.w("  JAR name: " + file.getName());
+                    Logger.w("  Attempt: " + attempt + "/" + maxRetries);
+                    Logger.w("  Error: " + e.getMessage());
+                    if (attempt < maxRetries) {
+                        try {
+                            Thread.sleep(50 * attempt); // exponential backoff
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                } else {
+                    throw e; // non-retryable error
+                }
+            }
+        }
+        if (lastException != null) {
+            Logger.e("=== JAR read failed after " + maxRetries + " retries ===");
+            Logger.e("  Corrupted JAR: " + file.getAbsolutePath());
+            throw lastException;
+        }
+    }
+
+    private void doResolveJarFile(File file) throws IOException {
+        File jarFile = createFile(file, ".jar");
+        try (JarFile jar = new JarFile(jarFile)) {
             Enumeration<JarEntry> entries = jar.entries();
             while (entries.hasMoreElements()) {
                 final JarEntry entry = entries.nextElement();
@@ -206,22 +250,53 @@ public class RouterTask {
                     }
                 }
             }
-            jar.close();
         }
     }
 
     private void resolveCachedClassInJar(String path) throws IOException {
         count.incrementAndGet();
-        try (InputStream stream = new URL(path).openStream()) {
-            CtClass ctClass = pool.makeClass(stream);
-            if (!classClassify.doClassify(ctClass)) {
-                cachePathSet.remove(path);
+        int maxRetries = 3;
+        int attempt = 0;
+        Exception lastException = null;
+        // Extract JAR file path from jar:file:/path/to/file.jar!/com/example/Class.class
+        String jarPath = path.startsWith("jar:file:") ? path.substring(9, path.indexOf("!/")) : path;
+        while (attempt < maxRetries) {
+            attempt++;
+            try (InputStream stream = new URL(path).openStream()) {
+                CtClass ctClass = pool.makeClass(stream);
+                if (!classClassify.doClassify(ctClass)) {
+                    cachePathSet.remove(path);
+                }
+                return; // success
+            } catch (Exception e) {
+                lastException = e;
+                String msg = e.getMessage();
+                if (msg != null && (msg.contains("ZipFile invalid LOC header") || msg.contains("zip"))) {
+                    Logger.w("=== Corrupted JAR detected (cached) ===");
+                    Logger.w("  JAR file: " + jarPath);
+                    Logger.w("  Entry: " + path);
+                    Logger.w("  Attempt: " + attempt + "/" + maxRetries);
+                    Logger.w("  Error: " + msg);
+                    if (attempt < maxRetries) {
+                        try {
+                            Thread.sleep(50 * attempt);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                } else {
+                    Logger.e("drouter resolve jar class error," +
+                            " entry=" + path +
+                            " exception=" + msg);
+                    throw e;
+                }
             }
-        } catch (Exception e) {
-            Logger.e("drouter resolve jar class error," +
-                    " entry=" + path +
-                    " exception=" + e.getMessage());
-            throw e;
+        }
+        if (lastException != null) {
+            Logger.e("=== JAR read failed after " + maxRetries + " retries ===");
+            Logger.e("  Corrupted JAR: " + jarPath);
+            Logger.e("  Entry: " + path);
+            throw new IOException(lastException.getMessage(), lastException);
         }
     }
 

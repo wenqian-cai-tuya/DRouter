@@ -44,7 +44,7 @@ abstract class RouterTransform @Inject constructor(
     @TaskAction
     fun taskAction() {
         val timeStart = System.currentTimeMillis()
-        Logger.v("DRouterTask start"
+        Logger.v("cai1 DRouterTask start"
                 + " | gradle:" + androidComponents.pluginVersion.run { "$major.$minor.$micro" })
         RouterTask(assembleClassPath(), mutableSetOf(), false, routerDir).run()
         inputFiles.add(routerDir)
