@@ -91,6 +91,17 @@ class RouterCollect extends AbsRouterCollect {
                     } else if (checkSuper(routerCc, "com.didi.drouter.router.IRouterHandler")) {
                         type = "com.didi.drouter.store.RouterMeta.HANDLER";
                     } else {
+                        // Check if type detection failed due to JAR corruption
+                        if (isClassJarCorrupted(routerCc)) {
+                            String jarPath = getClassJarPath(routerCc);
+                            System.err.println("=== Cannot determine class type due to corrupted JAR ===");
+                            System.err.println("  Class: " + routerCc.getName());
+                            if (jarPath != null) {
+                                System.err.println("  JAR file: " + jarPath);
+                            }
+                            System.err.println("  >>> Skipping this class, build will continue <<<");
+                            continue;
+                        }
                         throw new Exception("@Router target class illegal, " +
                                 "support only Activity/Fragment/View/IRouterHandler");
                     }

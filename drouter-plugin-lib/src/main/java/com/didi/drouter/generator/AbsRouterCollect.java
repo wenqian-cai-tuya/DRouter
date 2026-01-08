@@ -6,8 +6,10 @@ import com.didi.drouter.utils.TextUtil;
 
 import java.io.File;
 import java.lang.reflect.Modifier;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import javassist.ClassPool;
 import javassist.CtClass;
@@ -160,24 +162,41 @@ abstract class AbsRouterCollect {
     // check all super class and interface, include self
     // As long as any of the super ct contains classNames return yes.
     boolean checkSuper(CtClass ct, String... classNames) {
+        return checkSuperInternal(ct, ct, classNames);
+    }
+
+    // check with error handling - skip corrupted classes instead of failing
+    private boolean checkSuperInternal(CtClass ct, CtClass originalCt, String[] classNames) {
         try {
             while (ct != null) {
                 if (match(ct, classNames)) {   //self
                     return true;
                 }
-                if (checkInterface(ct, classNames)) {
+                if (checkInterfaceInternal(ct, originalCt, classNames)) {
                     return true;
                 }
                 ct = ct.getSuperclass();
             }
         } catch (NotFoundException e) {
             // ignore
+        } catch (RuntimeException e) {
+            if (isZipError(e)) {
+                handleJarReadError(ct, originalCt, e);
+                // Skip this class and return false instead of throwing
+                System.err.println("  >>> Skipping class due to corrupted JAR, build will continue <<<");
+                return false;
+            }
+            throw e;
         }
         return false;
     }
 
     // ct can be class or interface, include self, tree
     private boolean checkInterface(CtClass ct, String... classNames) {
+        return checkInterfaceInternal(ct, ct, classNames);
+    }
+
+    private boolean checkInterfaceInternal(CtClass ct, CtClass originalCt, String[] classNames) {
         if (ct == null) {
             return false;
         }
@@ -186,13 +205,21 @@ abstract class AbsRouterCollect {
         }
         try {
             for (CtClass superInterface : ct.getInterfaces()) {
-                boolean r = checkInterface(superInterface, classNames);
+                boolean r = checkInterfaceInternal(superInterface, originalCt, classNames);
                 if (r) {
                     return true;
                 }
             }
         } catch (NotFoundException e) {
             // ignore
+        } catch (RuntimeException e) {
+            if (isZipError(e)) {
+                handleJarReadError(ct, originalCt, e);
+                // Skip this class and return false instead of throwing
+                System.err.println("  >>> Skipping class due to corrupted JAR, build will continue <<<");
+                return false;
+            }
+            throw e;
         }
         return false;
     }
@@ -204,5 +231,79 @@ abstract class AbsRouterCollect {
             }
         }
         return false;
+    }
+
+    /**
+     * Check if error is related to ZIP/JAR corruption
+     */
+    protected boolean isZipError(Exception e) {
+        String msg = e.getMessage();
+        if (msg != null && (msg.contains("ZipException") || msg.contains("ZipFile") || msg.contains("LOC header"))) {
+            return true;
+        }
+        // Check cause chain
+        Throwable cause = e.getCause();
+        while (cause != null) {
+            String causeMsg = cause.getMessage();
+            if (causeMsg != null && (causeMsg.contains("ZipException") || causeMsg.contains("LOC header"))) {
+                return true;
+            }
+            cause = cause.getCause();
+        }
+        return false;
+    }
+
+    /**
+     * Check if the class's JAR file is corrupted by trying to read its superclass
+     */
+    protected boolean isClassJarCorrupted(CtClass ct) {
+        try {
+            // Try to access superclass - this will trigger JAR read
+            CtClass superClass = ct.getSuperclass();
+            while (superClass != null) {
+                // Try to get interfaces - another operation that reads JAR
+                superClass.getInterfaces();
+                superClass = superClass.getSuperclass();
+            }
+            return false;
+        } catch (NotFoundException e) {
+            return false; // Not found is not corruption
+        } catch (RuntimeException e) {
+            return isZipError(e);
+        }
+    }
+
+    private void handleJarReadError(CtClass ct, CtClass originalClass, RuntimeException e) {
+        String jarPath = getClassJarPath(ct);
+        String originalJarPath = originalClass != null ? getClassJarPath(originalClass) : null;
+        System.err.println("=== Corrupted JAR detected ===");
+        System.err.println("  Processing class: " + (originalClass != null ? originalClass.getName() : ct.getName()));
+        System.err.println("  Failed when loading: " + ct.getName());
+        if (jarPath != null) {
+            System.err.println("  Corrupted JAR file: " + jarPath);
+        }
+        if (originalJarPath != null && !originalJarPath.equals(jarPath)) {
+            System.err.println("  Original class JAR: " + originalJarPath);
+        }
+        System.err.println("  Error: " + e.getMessage());
+    }
+
+    protected String getClassJarPath(CtClass ct) {
+        try {
+            java.net.URL url = ct.getURL();
+            if (url != null) {
+                String urlStr = url.toString();
+                // jar:file:/path/to/file.jar!/com/example/Class.class
+                if (urlStr.startsWith("jar:file:")) {
+                    int idx = urlStr.indexOf("!/");
+                    if (idx > 0) {
+                        return urlStr.substring(9, idx);
+                    }
+                }
+                return urlStr;
+            }
+        } catch (Exception ignore) {
+        }
+        return null;
     }
 }
